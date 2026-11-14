@@ -91,7 +91,10 @@ export function teamActions({ call, after, partFor, roster, ui, live, cards, hel
     beginSectionRename: id => ui.set(state => ({ ...state, renameSection: id })),
     endSectionRename: () => ui.set(state => (state.renameSection ? { ...state, renameSection: null } : state)),
     deleteRoom: id => after(call('delete-room', { id })),
-    openMenu: (menu) => { ui.set(state => ({ ...state, menu, palette: null })) },
+    openMenu: (menu) => {
+      const captured = menu.kind === 'bot' || menu.kind === 'room' ? { ...menu, sessionId: partFor(menu.id) } : menu
+      ui.set(state => ({ ...state, menu: captured, palette: null }))
+    },
     closeMenu: () => { ui.set(state => (state.menu ? { ...state, menu: null } : state)) },
     closeOverlay: () => { ui.set(state => ({ ...state, newChat: null, newChatSection: null, exchange: null, details: state.newChat || state.exchange ? state.details : null })) },
     createBot: payload => after(call('create-bot', payload)),
