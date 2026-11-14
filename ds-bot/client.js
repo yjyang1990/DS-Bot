@@ -13866,7 +13866,8 @@ function teamActions({ call: call2, after, partFor, roster, ui: ui2, live, cards
     endSectionRename: () => ui2.set((state) => state.renameSection ? { ...state, renameSection: null } : state),
     deleteRoom: (id) => after(call2("delete-room", { id })),
     openMenu: (menu) => {
-      ui2.set((state) => ({ ...state, menu, palette: null }));
+      const captured = menu.kind === "bot" || menu.kind === "room" ? { ...menu, sessionId: partFor(menu.id) } : menu;
+      ui2.set((state) => ({ ...state, menu: captured, palette: null }));
     },
     closeMenu: () => {
       ui2.set((state) => state.menu ? { ...state, menu: null } : state);
@@ -15598,9 +15599,10 @@ body[data-bt-layout=flat] .bt-tools::after{display:none}
 button:hover .bt-you{background:color-mix(in srgb,var(--bt-ink) 9%,var(--bt-sidebar))}
 .bt-you-wrap{display:inline-flex;padding:0}
 
-.bt-menu{position:fixed;pointer-events:auto;z-index:60;min-width:200px;padding:6px;border-radius:12px;background:var(--bt-glass-bg);-webkit-backdrop-filter:blur(24px) saturate(180%);backdrop-filter:blur(24px) saturate(180%);border:.5px solid var(--bt-glass-rim);box-shadow:var(--bt-glass-shadow),0 0 0 1px rgba(228,228,228,.04);display:flex;flex-direction:column;gap:2px;transform-origin:var(--bt-origin,top left);animation:bt-pop-drop ${SPRING_TAP.duration}ms ${SPRING_TAP.easing},bt-veil-in .14s ease-out;font-family:var(--bt-font);box-sizing:border-box}
+.bt-menu{position:fixed;pointer-events:auto;z-index:60;min-width:200px;max-height:calc(100dvh - 16px);overflow-y:auto;padding:6px;border-radius:12px;background:var(--bt-glass-bg);-webkit-backdrop-filter:blur(24px) saturate(180%);backdrop-filter:blur(24px) saturate(180%);border:.5px solid var(--bt-glass-rim);box-shadow:var(--bt-glass-shadow),0 0 0 1px rgba(228,228,228,.04);display:flex;flex-direction:column;gap:2px;transform-origin:var(--bt-origin,top left);animation:bt-pop-drop ${SPRING_TAP.duration}ms ${SPRING_TAP.easing},bt-veil-in .14s ease-out;font-family:var(--bt-font);box-sizing:border-box}
 .bt-menu button{display:flex;align-items:center;gap:4px;width:100%;min-height:30px;text-align:left;border:0;background:none;border-radius:6px;padding:6px 8px;font:inherit;font-size:13px;line-height:18px;color:var(--bt-ink);cursor:pointer;box-sizing:border-box}
-.bt-menu button:hover{background:var(--bt-hover)}
+.bt-menu button:not(:disabled):hover{background:var(--bt-hover)}
+.bt-menu button:disabled{opacity:.35;cursor:default}
 .bt-menu button svg{flex:none;width:16px;height:16px;margin:0 1px}
 .bt-menu .bt-danger{color:var(--bt-danger)}
 .bt-menu-sep{height:.5px;flex:none;background:var(--bt-line-2);margin:4px 8px}
@@ -27295,7 +27297,7 @@ function AgentSessionRow({ session, agent, actions, renaming, index }) {
       onContextMenu: (event) => {
         event.preventDefault();
         event.stopPropagation();
-        actions.openMenu({ kind: "agent-session", id: session.id, agentId: agent.id, x: event.clientX, y: event.clientY });
+        actions.openMenu({ kind: "agent-session", id: session.id, agentId: agent.id, title: agentSessionTitle(session), x: event.clientX, y: event.clientY });
       }
     },
     (0, import_react34.createElement)("span", { className: "bt-agent-sub-title" }, agentSessionTitle(session)),
@@ -37102,6 +37104,7 @@ function VoiceMode({ sessionId, paneLeft, roster, actions, useSessions, useSessi
 // src/client/context-menu.js
 var import_react58 = require("react");
 var SECTION_COLORS = ["blue", "orange", "green", "violet", "rose"];
+var menuStyle = (place) => ({ ...place, maxHeight: Math.max(0, (window.visualViewport?.height ?? window.innerHeight) - 16) });
 function sectionMoveItems(entry, roster, actions) {
   const sections = roster.sections ?? [];
   return [
@@ -37118,6 +37121,47 @@ function sectionMoveItems(entry, roster, actions) {
       if (sec?.id) actions.beginSectionRename(sec.id);
     }]
   ].filter(Boolean);
+}
+function SessionMenuItems({ sessionId, displayTitle, actions, leaving }) {
+  const [items, setItems] = (0, import_react58.useState)([]);
+  const resolution = (0, import_react58.useRef)(null);
+  (0, import_react58.useEffect)(() => {
+    if (leaving) return void 0;
+    const menu = actions.resolveSessionMenu?.({ kind: "ds-bot.session", value: { sessionId, displayTitle } });
+    if (!menu) return void 0;
+    resolution.current = menu;
+    const update = () => setItems(menu.source.getSnapshot());
+    const unsubscribe = menu.source.subscribe(update);
+    update();
+    return () => {
+      unsubscribe();
+      menu.dispose();
+      resolution.current = null;
+    };
+  }, [sessionId, displayTitle, leaving]);
+  if (items.length === 0) return null;
+  const render = (item, depth = 0, disabled = false) => (0, import_react58.createElement)(
+    import_react58.Fragment,
+    { key: item.id },
+    item.separatorBefore ? (0, import_react58.createElement)("div", { className: "bt-menu-sep", role: "separator" }) : null,
+    item.children !== void 0 ? (0, import_react58.createElement)(
+      import_react58.Fragment,
+      null,
+      (0, import_react58.createElement)("div", { className: "bt-menu-sub-head" }, item.label),
+      item.children.map((child) => render(child, depth + 1, disabled || item.disabled))
+    ) : (0, import_react58.createElement)("button", {
+      type: "button",
+      role: "menuitem",
+      disabled: disabled || item.disabled,
+      className: item.danger ? "bt-danger" : void 0,
+      style: depth ? { paddingLeft: 8 + depth * 12 } : void 0,
+      onClick: () => {
+        resolution.current?.select(item.id);
+        actions.closeMenu();
+      }
+    }, (0, import_react58.createElement)("span", { className: "bt-menu-label" }, item.label))
+  );
+  return (0, import_react58.createElement)(import_react58.Fragment, null, (0, import_react58.createElement)("div", { className: "bt-menu-sep", role: "separator" }), items.map((item) => render(item)));
 }
 function ContextMenu({ menu, roster, actions, useWork, leaving = false }) {
   useEscape(() => actions.closeMenu());
@@ -37140,9 +37184,16 @@ function ContextMenu({ menu, roster, actions, useWork, leaving = false }) {
   const [place, setPlace] = (0, import_react58.useState)({ left: menu.x, top: menu.y });
   const tick = useViewport();
   (0, import_react58.useLayoutEffect)(() => {
-    const box = ref.current?.getBoundingClientRect();
-    if (!box) return;
-    setPlace({ left: Math.max(8, Math.min(menu.x, window.innerWidth - box.width - 8)), top: Math.max(8, Math.min(menu.y, viewBottom() - box.height - 8)) });
+    const element = ref.current;
+    if (!element) return void 0;
+    const fit2 = () => {
+      const box = element.getBoundingClientRect();
+      setPlace({ left: Math.max(8, Math.min(menu.x, window.innerWidth - box.width - 8)), top: Math.max((window.visualViewport?.offsetTop ?? 0) + 8, Math.min(menu.y, viewBottom() - box.height - 8)) });
+    };
+    fit2();
+    const observer = new ResizeObserver(fit2);
+    observer.observe(element);
+    return () => observer.disconnect();
   }, [menu.x, menu.y, tick]);
   if (menu.kind === "agent" || menu.kind === "agent-session") return (0, import_react58.createElement)(AgentMenu, { menu, roster, actions, leaving });
   if (menu.kind === "section" || menu.kind === "section-add") return (0, import_react58.createElement)(SectionMenu, { menu, roster, actions, leaving });
@@ -37180,12 +37231,15 @@ function ContextMenu({ menu, roster, actions, useWork, leaving = false }) {
       isMainBot ? null : [room2 ? t("Delete group") : t("Delete"), TrashIcon, () => bot ? actions.deleteBot(bot.id) : actions.deleteRoom(menu.id), true]
     ]
   ].map((group) => group.filter(Boolean)).filter((group) => group.length > 0);
+  const dangerIndex = groups.findIndex((group) => group.some((item) => item[3]));
+  const sessionItems = (0, import_react58.createElement)(SessionMenuItems, { sessionId: menu.sessionId ?? currentPart(entry), displayTitle: entry.name, actions, leaving });
   return (0, import_react58.createElement)(
     "div",
-    { ref, className: "bt-menu", role: "menu", "aria-label": t("{name} actions", { name: bot?.name ?? room2.name }), style: place, "data-leaving": leaving || void 0 },
+    { ref, className: "bt-menu", role: "menu", "aria-label": t("{name} actions", { name: bot?.name ?? room2.name }), style: menuStyle(place), "data-leaving": leaving || void 0 },
     groups.map((group, index) => (0, import_react58.createElement)(
       import_react58.Fragment,
       { key: index },
+      index === dangerIndex ? sessionItems : null,
       index > 0 ? (0, import_react58.createElement)("div", { className: "bt-menu-sep", role: "separator" }) : null,
       group.map(([label, Icon, run2, danger, checked]) => (0, import_react58.createElement)("button", {
         key: label,
@@ -37197,7 +37251,8 @@ function ContextMenu({ menu, roster, actions, useWork, leaving = false }) {
           void Promise.resolve(run2()).catch((error) => actions.reportError(error, "menu"));
         }
       }, (0, import_react58.createElement)(Icon), (0, import_react58.createElement)("span", { className: "bt-menu-label" }, label), checked ? (0, import_react58.createElement)("span", { className: "bt-menu-check" }, (0, import_react58.createElement)(CheckIcon)) : null))
-    ))
+    )),
+    dangerIndex === -1 ? sessionItems : null
   );
 }
 function SectionMenu({ menu, roster, actions, leaving }) {
@@ -37213,9 +37268,16 @@ function SectionMenu({ menu, roster, actions, leaving }) {
   const [place, setPlace] = (0, import_react58.useState)({ left: menu.x, top: menu.y });
   const tick = useViewport();
   (0, import_react58.useLayoutEffect)(() => {
-    const box = ref.current?.getBoundingClientRect();
-    if (!box) return;
-    setPlace({ left: Math.max(8, Math.min(menu.x, window.innerWidth - box.width - 8)), top: Math.max(8, Math.min(menu.y, viewBottom() - box.height - 8)) });
+    const element = ref.current;
+    if (!element) return void 0;
+    const fit2 = () => {
+      const box = element.getBoundingClientRect();
+      setPlace({ left: Math.max(8, Math.min(menu.x, window.innerWidth - box.width - 8)), top: Math.max((window.visualViewport?.offsetTop ?? 0) + 8, Math.min(menu.y, viewBottom() - box.height - 8)) });
+    };
+    fit2();
+    const observer = new ResizeObserver(fit2);
+    observer.observe(element);
+    return () => observer.disconnect();
   }, [menu.x, menu.y, tick]);
   const sections = roster.sections ?? [];
   const index = sections.findIndex((sec2) => sec2.id === menu.id);
@@ -37228,7 +37290,7 @@ function SectionMenu({ menu, roster, actions, leaving }) {
     ];
     return (0, import_react58.createElement)(
       "div",
-      { ref, className: "bt-menu bt-sec-add-menu", role: "menu", "aria-label": t("Add to {name}", { name: sec.name }), style: place, "data-leaving": leaving || void 0 },
+      { ref, className: "bt-menu bt-sec-add-menu", role: "menu", "aria-label": t("Add to {name}", { name: sec.name }), style: menuStyle(place), "data-leaving": leaving || void 0 },
       (0, import_react58.createElement)("button", {
         type: "button",
         role: "menuitem",
@@ -37286,7 +37348,7 @@ function SectionMenu({ menu, roster, actions, leaving }) {
   };
   return (0, import_react58.createElement)(
     "div",
-    { ref, className: "bt-menu", role: "menu", "aria-label": t("{name} actions", { name: sec.name }), style: place, "data-leaving": leaving || void 0 },
+    { ref, className: "bt-menu", role: "menu", "aria-label": t("{name} actions", { name: sec.name }), style: menuStyle(place), "data-leaving": leaving || void 0 },
     (0, import_react58.createElement)("button", {
       type: "button",
       role: "menuitem",
@@ -37367,9 +37429,16 @@ function AgentMenu({ menu, roster, actions, leaving }) {
   const [place, setPlace] = (0, import_react58.useState)({ left: menu.x, top: menu.y });
   const tick = useViewport();
   (0, import_react58.useLayoutEffect)(() => {
-    const box = ref.current?.getBoundingClientRect();
-    if (!box) return;
-    setPlace({ left: Math.max(8, Math.min(menu.x, window.innerWidth - box.width - 8)), top: Math.max(8, Math.min(menu.y, viewBottom() - box.height - 8)) });
+    const element = ref.current;
+    if (!element) return void 0;
+    const fit2 = () => {
+      const box = element.getBoundingClientRect();
+      setPlace({ left: Math.max(8, Math.min(menu.x, window.innerWidth - box.width - 8)), top: Math.max((window.visualViewport?.offsetTop ?? 0) + 8, Math.min(menu.y, viewBottom() - box.height - 8)) });
+    };
+    fit2();
+    const observer = new ResizeObserver(fit2);
+    observer.observe(element);
+    return () => observer.disconnect();
   }, [menu.x, menu.y, tick]);
   const agent = roster.agentsById[menu.kind === "agent" ? menu.id : menu.agentId];
   if (agent === void 0) return null;
@@ -37389,12 +37458,15 @@ function AgentMenu({ menu, roster, actions, leaving }) {
       [t("Archive"), TrashIcon, () => actions.archiveAgentSession(agent.id, menu.id), true]
     ]
   ];
+  const dangerIndex = groups.findIndex((group) => group.some((item) => item[3]));
+  const sessionItems = menu.kind === "agent-session" ? (0, import_react58.createElement)(SessionMenuItems, { sessionId: menu.id, displayTitle: menu.title ?? menu.id, actions, leaving }) : null;
   return (0, import_react58.createElement)(
     "div",
-    { ref, className: "bt-menu", role: "menu", "aria-label": menu.kind === "agent" ? "DSH Agent" : t("Session actions"), style: place, "data-leaving": leaving || void 0 },
+    { ref, className: "bt-menu", role: "menu", "aria-label": menu.kind === "agent" ? "DSH Agent" : t("Session actions"), style: menuStyle(place), "data-leaving": leaving || void 0 },
     groups.map((group, index) => (0, import_react58.createElement)(
       import_react58.Fragment,
       { key: index },
+      index === dangerIndex ? sessionItems : null,
       index > 0 ? (0, import_react58.createElement)("div", { className: "bt-menu-sep", role: "separator" }) : null,
       group.map(([label, Icon, run2, danger, checked]) => (0, import_react58.createElement)("button", {
         key: label,
@@ -37406,7 +37478,8 @@ function AgentMenu({ menu, roster, actions, leaving }) {
           void Promise.resolve(run2()).catch((error) => console.warn("[ds-bot]", error));
         }
       }, (0, import_react58.createElement)(Icon), (0, import_react58.createElement)("span", { className: "bt-menu-label" }, label), checked ? (0, import_react58.createElement)("span", { className: "bt-menu-check" }, (0, import_react58.createElement)(CheckIcon)) : null))
-    ))
+    )),
+    dangerIndex === -1 ? sessionItems : null
   );
 }
 
@@ -41574,6 +41647,7 @@ function apply(ctx) {
       else if (kind === "letgo") void actions.computerAllowForeground(botId);
     });
   }
+  actions.resolveSessionMenu = (target) => ctx.get("contextMenus")?.resolve(target);
   const face = () => ({ actions, hooks: { roster, ui: ui2, activity, work, memoryNews, registry, turnClock, live, computer, cards, heldCards, browserPages, browserTabs, browserHolds, surface, update, frame, sidebarPref, settingsShellHeld } });
   ctx.effect(() => {
     const offStyles = installCompiledStyles(SETTINGS_SHELL_CSS, "settings-shell");

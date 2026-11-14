@@ -194,7 +194,7 @@ function AgentSessionRow({ session, agent, actions, renaming, index }) {
     onContextMenu: (event) => {
       event.preventDefault()
       event.stopPropagation()
-      actions.openMenu({ kind: 'agent-session', id: session.id, agentId: agent.id, x: event.clientX, y: event.clientY })
+      actions.openMenu({ kind: 'agent-session', id: session.id, agentId: agent.id, title: agentSessionTitle(session), x: event.clientX, y: event.clientY })
     },
   },
   h('span', { className: 'bt-agent-sub-title' }, agentSessionTitle(session)),

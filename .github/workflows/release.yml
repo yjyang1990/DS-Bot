@@ -39,6 +39,8 @@ concurrency:
 
 jobs:
   publish:
+    # Fork releases distribute the plugin from GitHub, without publishing upstream npm or app builds.
+    if: github.repository == 'Fei2411/DS-Bot'
     name: Check and publish
     runs-on: ubuntu-latest
     timeout-minutes: 20

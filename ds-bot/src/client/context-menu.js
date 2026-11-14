@@ -9,6 +9,7 @@ import { stepMenuFocus, useViewport, viewBottom } from './motion.js'
 import { t } from './i18n.js'
 
 const SECTION_COLORS = ['blue', 'orange', 'green', 'violet', 'rose']
+const menuStyle = place => ({ ...place, maxHeight: Math.max(0, (window.visualViewport?.height ?? window.innerHeight) - 16) })
 
 function sectionMoveItems(entry, roster, actions) {
   const sections = roster.sections ?? []
@@ -28,6 +29,32 @@ function sectionMoveItems(entry, roster, actions) {
   ].filter(Boolean)
 }
 
+export function SessionMenuItems({ sessionId, displayTitle, actions, leaving }) {
+  const [items, setItems] = useState([])
+  const resolution = useRef(null)
+  useEffect(() => {
+    if (leaving) return undefined
+    const menu = actions.resolveSessionMenu?.({ kind: 'ds-bot.session', value: { sessionId, displayTitle } })
+    if (!menu) return undefined
+    resolution.current = menu
+    const update = () => setItems(menu.source.getSnapshot())
+    const unsubscribe = menu.source.subscribe(update)
+    update()
+    return () => { unsubscribe(); menu.dispose(); resolution.current = null }
+  }, [sessionId, displayTitle, leaving])
+  if (items.length === 0) return null
+  const render = (item, depth = 0, disabled = false) => h(Fragment, { key: item.id },
+    item.separatorBefore ? h('div', { className: 'bt-menu-sep', role: 'separator' }) : null,
+    item.children !== undefined ? h(Fragment, null,
+      h('div', { className: 'bt-menu-sub-head' }, item.label),
+      item.children.map(child => render(child, depth + 1, disabled || item.disabled))) : h('button', {
+      type: 'button', role: 'menuitem', disabled: disabled || item.disabled, className: item.danger ? 'bt-danger' : undefined,
+      style: depth ? { paddingLeft: 8 + depth * 12 } : undefined,
+      onClick: () => { resolution.current?.select(item.id); actions.closeMenu() },
+    }, h('span', { className: 'bt-menu-label' }, item.label)))
+  return h(Fragment, null, h('div', { className: 'bt-menu-sep', role: 'separator' }), items.map(item => render(item)))
+}
+
 export function ContextMenu({ menu, roster, actions, useWork, leaving = false }) {
   useEscape(() => actions.closeMenu())
   const ref = useRef(null)
@@ -42,9 +69,16 @@ export function ContextMenu({ menu, roster, actions, useWork, leaving = false })
   const [place, setPlace] = useState({ left: menu.x, top: menu.y })
   const tick = useViewport()
   useLayoutEffect(() => {
-    const box = ref.current?.getBoundingClientRect()
-    if (!box) return
-    setPlace({ left: Math.max(8, Math.min(menu.x, window.innerWidth - box.width - 8)), top: Math.max(8, Math.min(menu.y, viewBottom() - box.height - 8)) })
+    const element = ref.current
+    if (!element) return undefined
+    const fit = () => {
+      const box = element.getBoundingClientRect()
+      setPlace({ left: Math.max(8, Math.min(menu.x, window.innerWidth - box.width - 8)), top: Math.max((window.visualViewport?.offsetTop ?? 0) + 8, Math.min(menu.y, viewBottom() - box.height - 8)) })
+    }
+    fit()
+    const observer = new ResizeObserver(fit)
+    observer.observe(element)
+    return () => observer.disconnect()
   }, [menu.x, menu.y, tick])
   if (menu.kind === 'agent' || menu.kind === 'agent-session') return h(AgentMenu, { menu, roster, actions, leaving })
   if (menu.kind === 'section' || menu.kind === 'section-add') return h(SectionMenu, { menu, roster, actions, leaving })
@@ -80,13 +114,17 @@ export function ContextMenu({ menu, roster, actions, useWork, leaving = false })
       isMainBot ? null : [room ? t('Delete group') : t('Delete'), TrashIcon, () => (bot ? actions.deleteBot(bot.id) : actions.deleteRoom(menu.id)), true],
     ],
   ].map(group => group.filter(Boolean)).filter(group => group.length > 0)
-  return h('div', { ref, className: 'bt-menu', role: 'menu', 'aria-label': t('{name} actions', { name: bot?.name ?? room.name }), style: place, 'data-leaving': leaving || undefined },
+  const dangerIndex = groups.findIndex(group => group.some(item => item[3]))
+  const sessionItems = h(SessionMenuItems, { sessionId: menu.sessionId ?? currentPart(entry), displayTitle: entry.name, actions, leaving })
+  return h('div', { ref, className: 'bt-menu', role: 'menu', 'aria-label': t('{name} actions', { name: bot?.name ?? room.name }), style: menuStyle(place), 'data-leaving': leaving || undefined },
     groups.map((group, index) => h(Fragment, { key: index },
+      index === dangerIndex ? sessionItems : null,
       index > 0 ? h('div', { className: 'bt-menu-sep', role: 'separator' }) : null,
       group.map(([label, Icon, run, danger, checked]) => h('button', {
         key: label, type: 'button', role: 'menuitem', className: danger ? 'bt-danger' : undefined,
         onClick: () => { actions.closeMenu(); void Promise.resolve(run()).catch(error => actions.reportError(error, 'menu')) },
-      }, h(Icon), h('span', { className: 'bt-menu-label' }, label), checked ? h('span', { className: 'bt-menu-check' }, h(CheckIcon)) : null)))))
+      }, h(Icon), h('span', { className: 'bt-menu-label' }, label), checked ? h('span', { className: 'bt-menu-check' }, h(CheckIcon)) : null)))),
+    dangerIndex === -1 ? sessionItems : null)
 }
 
 function SectionMenu({ menu, roster, actions, leaving }) {
@@ -100,9 +138,16 @@ function SectionMenu({ menu, roster, actions, leaving }) {
   const [place, setPlace] = useState({ left: menu.x, top: menu.y })
   const tick = useViewport()
   useLayoutEffect(() => {
-    const box = ref.current?.getBoundingClientRect()
-    if (!box) return
-    setPlace({ left: Math.max(8, Math.min(menu.x, window.innerWidth - box.width - 8)), top: Math.max(8, Math.min(menu.y, viewBottom() - box.height - 8)) })
+    const element = ref.current
+    if (!element) return undefined
+    const fit = () => {
+      const box = element.getBoundingClientRect()
+      setPlace({ left: Math.max(8, Math.min(menu.x, window.innerWidth - box.width - 8)), top: Math.max((window.visualViewport?.offsetTop ?? 0) + 8, Math.min(menu.y, viewBottom() - box.height - 8)) })
+    }
+    fit()
+    const observer = new ResizeObserver(fit)
+    observer.observe(element)
+    return () => observer.disconnect()
   }, [menu.x, menu.y, tick])
   const sections = roster.sections ?? []
   const index = sections.findIndex(sec => sec.id === menu.id)
@@ -113,7 +158,7 @@ function SectionMenu({ menu, roster, actions, leaving }) {
       ...roster.bots.filter(bot => bot.id !== roster.mainBotId && !bot.hidden).map(bot => ({ kind: 'bot', item: bot })),
       ...roster.rooms.filter(room => !room.hidden).map(room => ({ kind: 'room', item: room })),
     ]
-    return h('div', { ref, className: 'bt-menu bt-sec-add-menu', role: 'menu', 'aria-label': t('Add to {name}', { name: sec.name }), style: place, 'data-leaving': leaving || undefined },
+    return h('div', { ref, className: 'bt-menu bt-sec-add-menu', role: 'menu', 'aria-label': t('Add to {name}', { name: sec.name }), style: menuStyle(place), 'data-leaving': leaving || undefined },
       h('button', {
         type: 'button', role: 'menuitem',
         onClick: () => { actions.closeMenu(); actions.openNewChat('create', sec.id) },
@@ -149,7 +194,7 @@ function SectionMenu({ menu, roster, actions, leaving }) {
     next.splice(target, 0, picked)
     void Promise.resolve(actions.reorderSections(next)).catch(error => actions.reportError(error, 'menu'))
   }
-  return h('div', { ref, className: 'bt-menu', role: 'menu', 'aria-label': t('{name} actions', { name: sec.name }), style: place, 'data-leaving': leaving || undefined },
+  return h('div', { ref, className: 'bt-menu', role: 'menu', 'aria-label': t('{name} actions', { name: sec.name }), style: menuStyle(place), 'data-leaving': leaving || undefined },
     h('button', {
       type: 'button', role: 'menuitem',
       onClick: () => { actions.closeMenu(); actions.beginSectionRename(sec.id) },
@@ -192,9 +237,16 @@ function AgentMenu({ menu, roster, actions, leaving }) {
   const [place, setPlace] = useState({ left: menu.x, top: menu.y })
   const tick = useViewport()
   useLayoutEffect(() => {
-    const box = ref.current?.getBoundingClientRect()
-    if (!box) return
-    setPlace({ left: Math.max(8, Math.min(menu.x, window.innerWidth - box.width - 8)), top: Math.max(8, Math.min(menu.y, viewBottom() - box.height - 8)) })
+    const element = ref.current
+    if (!element) return undefined
+    const fit = () => {
+      const box = element.getBoundingClientRect()
+      setPlace({ left: Math.max(8, Math.min(menu.x, window.innerWidth - box.width - 8)), top: Math.max((window.visualViewport?.offsetTop ?? 0) + 8, Math.min(menu.y, viewBottom() - box.height - 8)) })
+    }
+    fit()
+    const observer = new ResizeObserver(fit)
+    observer.observe(element)
+    return () => observer.disconnect()
   }, [menu.x, menu.y, tick])
   const agent = roster.agentsById[menu.kind === 'agent' ? menu.id : menu.agentId]
   if (agent === undefined) return null
@@ -216,11 +268,15 @@ function AgentMenu({ menu, roster, actions, leaving }) {
           [t('Archive'), TrashIcon, () => actions.archiveAgentSession(agent.id, menu.id), true],
         ],
       ]
-  return h('div', { ref, className: 'bt-menu', role: 'menu', 'aria-label': menu.kind === 'agent' ? 'DSH Agent' : t('Session actions'), style: place, 'data-leaving': leaving || undefined },
+  const dangerIndex = groups.findIndex(group => group.some(item => item[3]))
+  const sessionItems = menu.kind === 'agent-session' ? h(SessionMenuItems, { sessionId: menu.id, displayTitle: menu.title ?? menu.id, actions, leaving }) : null
+  return h('div', { ref, className: 'bt-menu', role: 'menu', 'aria-label': menu.kind === 'agent' ? 'DSH Agent' : t('Session actions'), style: menuStyle(place), 'data-leaving': leaving || undefined },
     groups.map((group, index) => h(Fragment, { key: index },
+      index === dangerIndex ? sessionItems : null,
       index > 0 ? h('div', { className: 'bt-menu-sep', role: 'separator' }) : null,
       group.map(([label, Icon, run, danger, checked]) => h('button', {
         key: label, type: 'button', role: 'menuitem', className: danger ? 'bt-danger' : undefined,
         onClick: () => { actions.closeMenu(); void Promise.resolve(run()).catch(error => console.warn('[ds-bot]', error)) },
-      }, h(Icon), h('span', { className: 'bt-menu-label' }, label), checked ? h('span', { className: 'bt-menu-check' }, h(CheckIcon)) : null)))))
+      }, h(Icon), h('span', { className: 'bt-menu-label' }, label), checked ? h('span', { className: 'bt-menu-check' }, h(CheckIcon)) : null)))),
+    dangerIndex === -1 ? sessionItems : null)
 }
